@@ -1,9 +1,9 @@
 import { Request, Response } from 'express';
-import { startSession, validateSession, destroySession } from './sessionController';
+import { generateToken, verifyToken } from '../utils/tokenUtils';
 
 export class AuthController {
   /**
-   * Handle user login with session-based authentication
+   * Handle user login with token-based authentication
    */
   async login(req: Request, res: Response) {
     try {
@@ -20,14 +20,11 @@ export class AuthController {
         return res.status(401).json({ error: 'Invalid credentials' });
       }
 
-      // Create session for authenticated user
-      const sessionId = await startSession(user.id, req);
-      
-      // Set session cookie
-      res.cookie('sessionId', sessionId, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        maxAge: 24 * 60 * 60 * 1000 // 24 hours
+      // Generate JWT token for authenticated user
+      const token = generateToken({
+        userId: user.id,
+        username: user.username,
+        email: user.email
       });
 
       return res.json({
@@ -36,26 +33,21 @@ export class AuthController {
           id: user.id,
           username: user.username,
           email: user.email
-        }
+        },
+        token
       });
     } catch (error) {
       console.error('Login error:', error);
       return res.status(500).json({ error: 'Internal server error' });
     }
   }
-
   /**
    * Handle user logout
    */
   async logout(req: Request, res: Response) {
     try {
-      const sessionId = req.cookies.sessionId;
-      
-      if (sessionId) {
-        await destroySession(sessionId);
-      }
-
-      res.clearCookie('sessionId');
+      // With token-based auth, logout is typically handled client-side
+      // by removing the token from storage
       return res.json({ message: 'Logout successful' });
     } catch (error) {
       console.error('Logout error:', error);
@@ -64,34 +56,41 @@ export class AuthController {
   }
 
   /**
-   * Get current user profile
+   * Get current user profile using token authentication
    */
   async getProfile(req: Request, res: Response) {
     try {
-      const sessionId = req.cookies.sessionId;
+      const token = req.headers['authorization'];
       
-      if (!sessionId) {
-        return res.status(401).json({ error: 'No session found' });
+      if (!token) {
+        return res.status(401).json({ error: 'No token provided' });
       }
 
-      const session = await validateSession(sessionId);
-      
-      if (!session) {
-        return res.status(401).json({ error: 'Invalid session' });
-      }
-
-      const user = await this.getUserById(session.userId);
+      const decoded = verifyToken(token) as any;
       
       return res.json({
         user: {
-          id: user.id,
-          username: user.username,
-          email: user.email
+          id: decoded.userId,
+          username: decoded.username,
+          email: decoded.email
         }
       });
     } catch (error) {
       console.error('Profile error:', error);
-      return res.status(500).json({ error: 'Internal server error' });
+      return res.status(401).json({ error: 'Invalid token' });
+    }
+  }
+
+  /**
+   * Handle token-based authentication (from commit example)
+   */
+  async loginWithToken(req: Request, res: Response) {
+    const token = req.headers['authorization'];
+    try {
+      const user = verifyToken(token!);
+      return res.json({ user });
+    } catch (err) {
+      return res.status(401).json({ error: 'Invalid token' });
     }
   }
 
